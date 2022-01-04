@@ -1,0 +1,237 @@
+esphome:
+  name: info_display
+  platform: ESP8266
+  board: d1_mini
+
+# Enable logging
+logger:
+  level: DEBUG
+wifi:
+  ssid: !secret ssid
+  password: !secret wifi_pass
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Info-Display Fallback Hotspot"
+    password: !secret ap_pass
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# Enable Home Assistant API
+api:
+  password: !secret api_pass
+
+ota:
+  password: !secret ota_pass
+
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    on_time:
+      - seconds: 0
+        minutes: '*'
+        then:
+          - component.update: paper_display
+
+sensor:
+  - platform: homeassistant
+    name: "Indoor Temperature"
+    entity_id: sensor.temperature_1_temperature
+    id: temperature_indoor
+    on_value:
+      then:
+        - component.update: paper_display
+  - platform: homeassistant
+    name: "Outdoor Temperature"
+    entity_id: sensor.temperature_5_temperature
+    on_value:
+      then:
+        - component.update: paper_display
+    id: temperature_outdoor
+  - platform: homeassistant
+    name: "Weather Forecast"
+    entity_id: sensor.openweathermap_weather_code
+    id: openweathermap_weather_code
+    on_value:
+      then:
+        - component.update: paper_display
+  - platform: homeassistant
+    name: "Weather Precipitation Probability"
+    entity_id: sensor.openweathermap_forecast_precipitation_probability
+    id: openweathermap_forecast_precipitation_probability
+    on_value:
+      then:
+        - component.update: paper_display
+  - platform: homeassistant
+    name: "Weather Precipitation"
+    entity_id: sensor.openweathermap_forecast_precipitation
+    id: openweathermap_forecast_precipitation
+    on_value:
+      then:
+        - component.update: paper_display
+  - platform: homeassistant
+    name: "Weather Temperature"
+    entity_id: sensor.openweathermap_forecast_temperature
+    id: openweathermap_forecast_temperature
+    on_value:
+      then:
+        - component.update: paper_display
+  - platform: homeassistant
+    name: "Climate Temperature"
+    entity_id: input_number.temperature_target
+    id: temperature_target
+    on_value:
+      then:
+        - component.update: paper_display
+
+binary_sensor:
+  - platform: homeassistant
+    name: "Door Contact"
+    entity_id: binary_sensor.window_12_contact
+    id: door_contact
+    on_state:
+      then:
+        - script.execute: update_led
+  - platform: homeassistant
+    name: "Bathroom Window"
+    entity_id: binary_sensor.window_2_contact
+    id: bathroom_window
+    on_state:
+      then:
+        - script.execute: update_led
+  - platform: homeassistant
+    name: "Window Open"
+    entity_id: binary_sensor.window_open
+    id: window_open
+    on_state:
+      then:
+        - script.execute: update_led
+  - platform: homeassistant
+    name: "Climate off"
+    entity_id: input_boolean.climate_off
+    id: climate_off
+    on_state:
+      then:
+        - component.update: paper_display
+
+script:
+  - id: update_led
+    then:
+      - if:
+          condition:
+            binary_sensor.is_off: door_contact
+          then:
+            - switch.turn_on: led
+            - logger.log: "LED off"
+          else:
+            - if:
+                condition:
+                  lambda: 'return id(bathroom_window).state || id(window_open).state;'
+                then:
+                  - switch.turn_off: led
+                  - logger.log: "LED on"
+                else:
+                  - switch.turn_on: led
+                  - logger.log: "LED off"
+
+switch:
+  - platform: gpio
+    pin: D4
+    id: led
+    restore_mode: ALWAYS_ON
+
+# Display
+font:
+  - file: 'fonts/OpenSans-Regular.ttf'
+    id: font_preset
+    size: 28
+  - file: 'fonts/OpenSans-Regular.ttf'
+    id: font_heading
+    size: 40
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: font_icon
+    size: 28
+    glyphs: [
+      "\U000F0F55", # home-thermometer-outline
+      "\U000F0E69", # tree-outline
+      "\U000F054B", # umbrella-outline
+      "\U000F050F", # thermometer
+      "\U000F0438", # radiator
+      "\U000F0AD8", # radiator-off
+    ]
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: font_icon_weather
+    size: 60
+    glyphs: [
+      "\U000F0590", # weather-cloudy
+      "\U000F0591", # weather-fog
+      "\U000F067E", # weather-lightning-rainy
+      "\U000F0595", # weather-partly-cloudy
+      "\U000F0F33", # weather-partly-rainy
+      "\U000F0596", # weather-pouring
+      "\U000F0597", # weather-rainy
+      "\U000F0598", # weather-snowy
+      "\U000F0599", # weather-sunny
+      "\U000F0F37", # weather-sunny-alert
+    ]
+
+spi:
+  clk_pin: D5
+  mosi_pin: D7
+
+display:
+  - platform: waveshare_epaper
+    id: paper_display
+    cs_pin: D8
+    dc_pin: D6
+    busy_pin: D2
+    reset_pin: D1
+    model: 2.90inv2
+    full_update_every: 100
+    update_interval: never
+    rotation: 0
+    pages:
+      - id: home
+        lambda: |-
+          it.strftime(it.get_width() / 2, 20, id(font_heading), TextAlign::CENTER, "%H:%M", id(homeassistant_time).now());
+
+          it.line(20, 50, it.get_width() - 20, 50);
+          if (id(openweathermap_weather_code).state < 300) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F067E");
+          } else if (id(openweathermap_weather_code).state < 400) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0597");
+          } else if (id(openweathermap_weather_code).state < 600) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0596");
+          } else if (id(openweathermap_weather_code).state < 600) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0598");
+          } else if (id(openweathermap_weather_code).state < 800) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0591");
+          } else if (id(openweathermap_weather_code).state == 800) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0599");
+          } else if (id(openweathermap_weather_code).state <= 802) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0595");
+          } else if (id(openweathermap_weather_code).state <= 900) {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0590");
+          } else {
+            it.print(it.get_width() / 2, 57, id(font_icon_weather), TextAlign::TOP_CENTER, "\U000F0F37");
+          }
+          it.print(0, 117, id(font_icon), TextAlign::TOP_LEFT, "\U000F054B");
+          it.printf(40, 111, id(font_preset), TextAlign::TOP_LEFT, "%d%%", int(id(openweathermap_forecast_precipitation_probability).state));
+          it.printf(40, 141, id(font_preset), TextAlign::TOP_LEFT, "%d mm", int(id(openweathermap_forecast_precipitation).state));
+          it.print(0, 182, id(font_icon), TextAlign::TOP_LEFT, "\U000F050F");
+          it.printf(40, 176, id(font_preset), TextAlign::TOP_LEFT, "%.1f°C", id(openweathermap_forecast_temperature).state);
+
+          it.line(20, 220, it.get_width() - 20, 220);
+          it.print(0, 232, id(font_icon), TextAlign::TOP_LEFT, "\U000F0F55");
+          it.printf(40, 226, id(font_preset), TextAlign::TOP_LEFT, "%.1f°C", id(temperature_indoor).state);
+          //it.print(0, 272, id(font_icon), TextAlign::TOP_LEFT, "\U000F0E69");
+          //it.printf(40, 266, id(font_preset), TextAlign::TOP_LEFT, "%.1f°C", id(temperature_outdoor).state);
+          if (id(climate_off).state) {
+            it.print(0, 272, id(font_icon), TextAlign::TOP_LEFT, "\U000F0AD8");
+          } else {
+            it.print(0, 272, id(font_icon), TextAlign::TOP_LEFT, "\U000F0438");
+          }
+          it.printf(40, 266, id(font_preset), TextAlign::TOP_LEFT, "%.1f°C", id(temperature_target).state);
